@@ -1,8 +1,9 @@
+import asyncio
 import gzip
 import os
 import re
 from enum import Enum
-from typing import Callable, List, Optional, Union
+from typing import Awaitable, Callable, List, Optional, Union
 
 from fastapi import FastAPI
 from starlette.requests import Request
@@ -96,11 +97,13 @@ class PrometheusFastApiInstrumentator:
         self.excluded_handlers = [re.compile(path) for path in excluded_handlers]
 
         self.instrumentations: List[Callable[[metrics.Info], None]] = []
+        self.async_instrumentations: List[Callable[[metrics.Info], Awaitable[None]]] = []
 
     def instrument(self, app: FastAPI):
         """Performs the instrumentation by adding middleware.
 
-        The middleware iterates through all `instrumentations` and executes them.
+        The middleware iterates through all `instrumentations` and `async_instrumentations`
+        and executes them.
 
         Args:
             app (FastAPI): FastAPI app instance.
@@ -131,6 +134,7 @@ class PrometheusFastApiInstrumentator:
             inprogress_name=self.inprogress_name,
             inprogress_labels=self.inprogress_labels,
             instrumentations=self.instrumentations,
+            async_instrumentations=self.async_instrumentations,
             excluded_handlers=self.excluded_handlers,
         )
         return self
@@ -214,11 +218,14 @@ class PrometheusFastApiInstrumentator:
 
         return self
 
-    def add(self, instrumentation_function: Callable[[metrics.Info], None]):
+    def add(
+        self,
+        instrumentation_function: Callable[[metrics.Info], Union[None, Awaitable[None]]],
+    ):
         """Adds function to list of instrumentations.
 
         Args:
-            instrumentation_function (Callable[[metrics.Info], None]): Function
+            instrumentation_function (Callable[[metrics.Info], Union[None, Awaitable[None]]]): Function
                 that will be executed during every request handler call (if
                 not excluded). See above for detailed information on the
                 interface of the function.
@@ -227,6 +234,9 @@ class PrometheusFastApiInstrumentator:
             self: Instrumentator. Builder Pattern.
         """
 
-        self.instrumentations.append(instrumentation_function)
+        if asyncio.iscoroutinefunction(instrumentation_function):
+            self.async_instrumentations.append(instrumentation_function)
+        else:
+            self.instrumentations.append(instrumentation_function)
 
         return self
